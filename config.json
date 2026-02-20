@@ -1,0 +1,12 @@
+{
+  "world_width": 30,
+  "world_height": 20,
+  "obstacle_density": 0.12,
+  "num_victims": 10,
+  "num_agents": 4,
+  "comm_range": 5,
+  "sensing_range": 3,
+  "max_steps": 300,
+  "seed": 42,
+  "render_interval": 20
+}

@@ -1,16 +1,10 @@
-"""
-Single-file multi-agent swarm simulation for disaster response.
-
-Run with:
-    python main.py
-"""
-
 import random
 import time
 import math
-from typing import List, Set, Tuple, Optional
-
-Coord = Tuple[int, int]
+import csv
+import os
+import json
+from datetime import datetime
 
 # Cell types
 EMPTY = 0
@@ -24,39 +18,32 @@ VICTIM = 2
 class World:
     """Simple 2D grid world with obstacles and victims."""
 
-    def __init__(
-        self,
-        width: int,
-        height: int,
-        obstacle_density: float,
-        num_victims: int,
-        seed: Optional[int] = None,
-    ) -> None:
+    def __init__(self, width, height, obstacle_density, num_victims, seed=None):
         self.width = width
         self.height = height
         self.rng = random.Random(seed)
 
         # grid[y][x]
-        self.grid: List[List[int]] = [
+        self.grid = [
             [EMPTY for _ in range(width)] for _ in range(height)
         ]
 
-        self.obstacles: Set[Coord] = set()
-        self.victims: Set[Coord] = set()
+        self.obstacles = set()
+        self.victims = set()
 
         self._generate_obstacles(obstacle_density)
         self._place_victims(num_victims)
 
-    def in_bounds(self, x: int, y: int) -> bool:
+    def in_bounds(self, x, y):
         return 0 <= x < self.width and 0 <= y < self.height
 
-    def is_obstacle(self, x: int, y: int) -> bool:
+    def is_obstacle(self, x, y):
         return (x, y) in self.obstacles
 
-    def is_free(self, x: int, y: int) -> bool:
+    def is_free(self, x, y):
         return self.in_bounds(x, y) and not self.is_obstacle(x, y)
 
-    def _generate_obstacles(self, density: float) -> None:
+    def _generate_obstacles(self, density):
         num_cells = self.width * self.height
         num_obstacles = int(num_cells * max(0.0, min(density, 0.8)))
         placed = 0
@@ -68,7 +55,7 @@ class World:
                 self.grid[y][x] = OBSTACLE
                 placed += 1
 
-    def _place_victims(self, num_victims: int) -> None:
+    def _place_victims(self, num_victims):
         placed = 0
         attempts = 0
         max_attempts = num_victims * 50
@@ -83,12 +70,12 @@ class World:
             self.grid[y][x] = VICTIM
             placed += 1
 
-    def get_neighbors_4(self, x: int, y: int) -> List[Coord]:
+    def get_neighbors_4(self, x, y):
         """4-connected neighbors (up, down, left, right) within bounds."""
         candidates = [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
         return [(nx, ny) for nx, ny in candidates if self.in_bounds(nx, ny)]
 
-    def render_ascii(self, agent_positions: Optional[Set[Coord]] = None) -> str:
+    def render_ascii(self, agent_positions=None):
         """
         Simple ASCII representation:
         '.' empty
@@ -96,11 +83,13 @@ class World:
         'V' victim
         'A' agent
         """
-        agent_positions = agent_positions or set()
-        lines: List[str] = []
+        if agent_positions is None:
+            agent_positions = set()
+
+        lines = []
 
         for y in range(self.height):
-            row_chars: List[str] = []
+            row_chars = []
             for x in range(self.width):
                 pos = (x, y)
                 if pos in agent_positions:
@@ -123,40 +112,34 @@ class World:
 class Agent:
     """Simple agent with local knowledge and basic movement."""
 
-    def __init__(
-        self,
-        agent_id: int,
-        position: Coord,
-        sensing_range: int,
-        comm_range: int,
-    ) -> None:
+    def __init__(self, agent_id, position, sensing_range, comm_range):
         self.id = agent_id
-        self.position: Coord = position
+        self.position = position
         self.sensing_range = sensing_range
         self.comm_range = comm_range
 
         # Knowledge
-        self.visited: Set[Coord] = {position}
-        self.known_victims: Set[Coord] = set()
+        self.visited = {position}
+        self.known_victims = set()
 
-    def update_position(self, new_pos: Coord) -> None:
+    def update_position(self, new_pos):
         self.position = new_pos
         self.visited.add(new_pos)
 
-    def integrate_victim_info(self, victim_positions: Set[Coord]) -> None:
+    def integrate_victim_info(self, victim_positions):
         self.known_victims |= victim_positions
 
 
 # =========================
 # Communication
 # =========================
-def euclidean_distance(a: Agent, b: Agent) -> float:
+def euclidean_distance(a, b):
     ax, ay = a.position
     bx, by = b.position
     return math.hypot(ax - bx, ay - by)
 
 
-def get_neighbors(agent: Agent, agents: List[Agent]) -> List[Agent]:
+def get_neighbors(agent, agents):
     """Agents within communication range of the given agent."""
     return [
         other
@@ -165,7 +148,7 @@ def get_neighbors(agent: Agent, agents: List[Agent]) -> List[Agent]:
     ]
 
 
-def share_victim_information(agents: List[Agent]) -> None:
+def share_victim_information(agents):
     """
     Simple gossip: each agent merges victim info
     from neighbors within communication range.
@@ -184,12 +167,7 @@ def share_victim_information(agents: List[Agent]) -> None:
 # =========================
 # Behavior (coverage)
 # =========================
-def choose_next_move(
-    agent: Agent,
-    world: World,
-    occupied_positions: Set[Coord],
-    rng: random.Random,
-) -> Coord:
+def choose_next_move(agent, world, occupied_positions, rng):
     """
     Very simple coverage behavior:
     - consider 4-neighborhood
@@ -219,14 +197,10 @@ def choose_next_move(
 # =========================
 # Perception
 # =========================
-def sense_victims_in_range(
-    world: World,
-    position: Coord,
-    sensing_range: int,
-) -> List[Coord]:
+def sense_victims_in_range(world, position, sensing_range):
     """Returns all victim cells within a square neighborhood."""
     x0, y0 = position
-    victims: List[Coord] = []
+    victims = []
 
     for dx in range(-sensing_range, sensing_range + 1):
         for dy in range(-sensing_range, sensing_range + 1):
@@ -240,23 +214,17 @@ def sense_victims_in_range(
     return victims
 
 
-def detect_victims(world: World, position: Coord, sensing_range: int) -> List[Coord]:
+def detect_victims(world, position, sensing_range):
     """Wrapper for sensing (could add noise later)."""
     return sense_victims_in_range(world, position, sensing_range)
 
 
 # =========================
-# Simulation helpers
+# Simulation helpers + METRICS LOGGING
 # =========================
-def spawn_agents(
-    world: World,
-    num_agents: int,
-    sensing_range: int,
-    comm_range: int,
-    rng: random.Random,
-) -> List[Agent]:
-    agents: List[Agent] = []
-    occupied: Set[Coord] = set()
+def spawn_agents(world, num_agents, sensing_range, comm_range, rng):
+    agents = []
+    occupied = set()
 
     while len(agents) < num_agents:
         x = rng.randrange(world.width)
@@ -277,21 +245,28 @@ def spawn_agents(
     return agents
 
 
-def run_simulation() -> None:
-    # ----- Configuration -----
-    world_width = 30
-    world_height = 20
-    obstacle_density = 0.12
-    num_victims = 10
+def run_simulation():
+    # ----- Load config (if present) -----
+    config_path = "config.json"
+    cfg = {}
+    if os.path.exists(config_path):
+        with open(config_path, "r") as f:
+            cfg = json.load(f)
 
-    num_agents = 8
-    comm_range = 5
-    sensing_range = 3
+    # ----- Configuration with defaults -----
+    world_width = cfg.get("world_width", 30)
+    world_height = cfg.get("world_height", 20)
+    obstacle_density = cfg.get("obstacle_density", 0.12)
+    num_victims = cfg.get("num_victims", 10)
 
-    max_steps = 300
-    seed = 42
-    render_interval = 20  # show map every N steps (0 = never)
-    # -------------------------
+    num_agents = cfg.get("num_agents", 8)
+    comm_range = cfg.get("comm_range", 5)
+    sensing_range = cfg.get("sensing_range", 3)
+
+    max_steps = cfg.get("max_steps", 300)
+    seed = cfg.get("seed", 42)
+    render_interval = cfg.get("render_interval", 20)  # 0 = never
+    # --------------------------------------
 
     rng = random.Random(seed)
 
@@ -312,9 +287,18 @@ def run_simulation() -> None:
     )
 
     total_victims = len(world.victims)
-    print(f"World: {world.width}x{world.height}")
-    print(f"Obstacles: {len(world.obstacles)}, Victims: {total_victims}")
-    print(f"Agents: {len(agents)}\n")
+    print("World: {}x{}".format(world.width, world.height))
+    print("Obstacles: {}, Victims: {}".format(len(world.obstacles), total_victims))
+    print("Agents: {}\n".format(len(agents)))
+
+    # ---- metrics logging setup ----
+    logs_dir = "logs"
+    os.makedirs(logs_dir, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_seed{}".format(seed))
+    metrics_path = os.path.join(logs_dir, "metrics_{}.csv".format(timestamp))
+
+    metrics_rows = []
+    # -------------------------------
 
     start_time = time.time()
     step = 0
@@ -335,8 +319,8 @@ def run_simulation() -> None:
         share_victim_information(agents)
 
         # 3) Movement decisions
-        occupied_positions: Set[Coord] = {a.position for a in agents}
-        new_positions: List[Coord] = []
+        occupied_positions = {a.position for a in agents}
+        new_positions = []
 
         for agent in agents:
             other_occupied = occupied_positions - {agent.position}
@@ -356,31 +340,76 @@ def run_simulation() -> None:
         discovered_victims = set().union(*(a.known_victims for a in agents))
         num_found = len(discovered_victims)
 
+        # coverage: unique visited cells across all agents / free cells
+        all_visited = set().union(*(a.visited for a in agents))
+        free_cells = world.width * world.height - len(world.obstacles)
+        coverage_percent = (
+            float(len(all_visited)) / free_cells * 100.0 if free_cells > 0 else 0.0
+        )
+
+        elapsed = time.time() - start_time
+
+        # store metrics for this step
+        metrics_rows.append(
+            [
+                step,
+                num_found,
+                total_victims,
+                len(all_visited),
+                free_cells,
+                coverage_percent,
+                elapsed,
+            ]
+        )
+
         if render_interval and step % render_interval == 0:
-            print(f"\n=== Step {step} ===")
+            print("\n=== Step {} ===".format(step))
             agent_positions = {a.position for a in agents}
             print(world.render_ascii(agent_positions))
             print(
-                f"Discovered victims: {num_found}/{total_victims} | "
-                f"Visited cells (agent 0): {len(agents[0].visited)}"
+                "Discovered victims: {}/{} | Visited cells (agent 0): {}".format(
+                    num_found, total_victims, len(agents[0].visited)
+                )
             )
 
         # Stop if all victims found
         if num_found >= total_victims and total_victims > 0:
             elapsed = time.time() - start_time
-            print(f"\nAll victims discovered at step {step} (t={elapsed:.2f}s).")
+            print(
+                "\nAll victims discovered at step {} (t={:.2f}s).".format(
+                    step, elapsed
+                )
+            )
             break
 
     else:
         elapsed = time.time() - start_time
         print(
-            f"\nSimulation finished (max_steps={max_steps}). "
-            f"Discovered victims: {num_found}/{total_victims}, "
-            f"time={elapsed:.2f}s"
+            "\nSimulation finished (max_steps={}). Discovered victims: {}/{}; time={:.2f}s".format(
+                max_steps, num_found, total_victims, elapsed
+            )
         )
 
+    # ---- write metrics to CSV ----
+    with open(metrics_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(
+            [
+                "step",
+                "victims_found",
+                "total_victims",
+                "visited_cells",
+                "free_cells",
+                "coverage_percent",
+                "elapsed_seconds",
+            ]
+        )
+        writer.writerows(metrics_rows)
 
-def main() -> None:
+    print("Metrics saved to {}".format(metrics_path))
+
+
+def main():
     run_simulation()
 
 
